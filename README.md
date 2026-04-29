@@ -1,40 +1,40 @@
-# Xiaomi MiMo TTS Voice Clone
+# 小米 MiMo 语音克隆 WebUI
 
-A web-based voice cloning application powered by Xiaomi's MiMo-V2.5-TTS API. Upload reference audio, type text, and generate speech that mimics the reference voice.
+基于小米 MiMo-V2.5-TTS API 的语音克隆 Web 应用。上传参考音频，输入文本，生成模仿参考音色的语音。
 
-## Features
+## 功能特性
 
-- **Voice Cloning** - Clone any voice from reference audio using MiMo-V2.5-TTS-voiceclone
-- **Multi-Reference Upload** - Upload and merge multiple audio files for better cloning quality
-- **Fine-Grained Control** - Adjust temperature, top_p, seed, and batch count
-- **Preset Modes** - Stable / Balanced / Creative one-click presets
-- **Emotion Tags** - Insert emotion markers like (Happy), (Sad), (Angry) into text
-- **Provider Selection** - Switch between MiMo Official and Token Plan endpoints, or use a custom endpoint
-- **Remember Settings** - API Key and endpoint saved in browser localStorage
-- **Cross-Platform** - Works on Windows, Linux, and macOS
+- **语音克隆** - 通过 MiMo-V2.5-TTS-voiceclone 模型克隆任意音色
+- **多参考音频** - 上传多个音频文件，自动拼接合并
+- **精细参数控制** - 调节 temperature、top_p、seed 和批量次数
+- **预设模式** - 稳定 / 均衡 / 创意 一键切换
+- **情绪标签** - 在文本中插入 (开心)、(悲伤)、(愤怒) 等情绪标记
+- **供应商端点** - 支持小米官方、Token Plan 端点，或自定义端点
+- **记住设置** - API Key 和端点保存在浏览器本地
+- **跨平台** - 支持 Windows、Linux、macOS
 
-## Quick Start
+## 快速开始
 
-### Option 1: Download EXE (No Python Required)
+### 方式一：下载 EXE（无需安装 Python）
 
-Download the latest `.exe` from [Releases](https://github.com/tangyucheng6420/xiaomi-mimo-tts-webui/releases) and double-click to run.
+从 [Releases](https://github.com/tangyucheng6420/xiaomi-mimo-tts-webui/releases) 下载 `.exe` 文件，双击即可运行。
 
-> Requires [ffmpeg](https://ffmpeg.org/download.html) for MP3 support (WAV works without it).
+> 需要 [ffmpeg](https://ffmpeg.org/download.html) 支持 MP3 格式（WAV 格式无需 ffmpeg）。
 
-### Option 2: Run with Python
+### 方式二：Python 运行
 
-**Windows:**
+**Windows：**
 ```
-Double-click start.bat
+双击 start.bat
 ```
 
-**Linux / macOS:**
+**Linux / macOS：**
 ```bash
 chmod +x start.sh
 ./start.sh
 ```
 
-**Or manually:**
+**手动运行：**
 ```bash
 git clone https://github.com/tangyucheng6420/xiaomi-mimo-tts-webui.git
 cd xiaomi-mimo-tts-webui
@@ -42,89 +42,89 @@ pip install -r requirements.txt
 python app.py
 ```
 
-Open http://localhost:7860 in your browser.
+浏览器打开 http://localhost:7860 即可使用。
 
-### Prerequisites
+### 前置条件
 
-- Python 3.9+ (not needed for EXE version)
-- [ffmpeg](https://ffmpeg.org/download.html) (for MP3 support; WAV works without it)
-- A MiMo API Key from [platform.xiaomimimo.com](https://platform.xiaomimimo.com)
+- Python 3.9+（EXE 版本不需要）
+- [ffmpeg](https://ffmpeg.org/download.html)（MP3 支持需要，WAV 可以不要）
+- MiMo API Key，从 [platform.xiaomimimo.com](https://platform.xiaomimimo.com) 获取
 
-## Usage
+## 使用方法
 
-1. **Enter API Key** - Get one from [platform.xiaomimimo.com](https://platform.xiaomimimo.com)
-2. **Select Endpoint** - Choose MiMo Official or Token Plan CN
-3. **Upload Reference Audio** - Drag & drop or click to upload (mp3/wav, multiple files supported)
-4. **Configure Parameters** - Use presets or manually adjust temperature/top_p/seed
-5. **Enter Text** - Type the text you want to synthesize, add emotion tags if desired
-6. **Generate** - Click "Generate Voice" and download the result
+1. **输入 API Key** - 从 [platform.xiaomimimo.com](https://platform.xiaomimimo.com) 获取
+2. **选择端点** - 选择小米官方或 Token Plan
+3. **上传参考音频** - 拖拽或点击上传（支持 mp3/wav，可多选）
+4. **调节参数** - 使用预设或手动调节 temperature/top_p/seed
+5. **输入文本** - 输入要合成的文本，可添加情绪标签
+6. **生成** - 点击"生成语音"并下载结果
 
-## Parameters Guide
+## 参数说明
 
-| Parameter | Range | Default | Description |
-|-----------|-------|---------|-------------|
-| temperature | 0 - 1.5 | 0.6 | Lower = more consistent and stable |
-| top_p | 0.01 - 1.0 | 0.95 | Lower = more deterministic |
-| seed | integer | random | Fixed seed for reproducible output |
+| 参数 | 范围 | 默认值 | 说明 |
+|------|------|--------|------|
+| temperature | 0 - 1.5 | 0.6 | 越低越稳定一致 |
+| top_p | 0.01 - 1.0 | 0.95 | 越低越确定 |
+| seed | 整数 | 随机 | 固定种子可复现相同结果 |
 
-### Preset Modes
+### 预设模式
 
-| Mode | Temperature | Top P | Use Case |
+| 模式 | Temperature | Top P | 适用场景 |
 |------|-------------|-------|----------|
-| Stable | 0.2 | 0.7 | Consistent, predictable output |
-| Balanced | 0.5 | 0.85 | General purpose |
-| Creative | 0.8 | 0.95 | More expressive, varied output |
+| 稳定模式 | 0.2 | 0.7 | 一致、可预测的输出 |
+| 均衡模式 | 0.5 | 0.85 | 通用场景 |
+| 创意模式 | 0.8 | 0.95 | 更有表现力、变化丰富 |
 
-## Emotion Tags
+## 情绪标签
 
-Insert these tags into your text to control emotion and pacing:
+在文本中插入以下标签控制情绪和节奏：
 
-`(Happy)` `(Sad)` `(Angry)` `(Gentle)` `(Low voice)` `(Sigh)` `(Laugh)` `(Whisper)` `(Crying)` `(Faster)` `(Pause)` `(Deep breath)`
+`(开心)` `(悲伤)` `(愤怒)` `(温柔)` `(低沉)` `(叹气)` `(笑声)` `(低声)` `(哭泣)` `(语速加快)` `(突然停顿)` `(深呼吸)`
 
-Example: `Hello! (Happy) How are you today? (Pause) I missed you.`
+示例：`你好啊！(开心) 最近怎么样？(突然停顿) 我好想你。`
 
-## API Providers
+## API 供应商
 
-| Provider | Base URL | Description |
-|----------|----------|-------------|
-| MiMo Official | `https://api.xiaomimimo.com/v1` | Direct access via Xiaomi platform |
-| Token Plan CN | `https://token-plan-cn.xiaomimimo.com/v1` | Token plan endpoint |
-| Custom | User-defined | Any OpenAI-compatible endpoint |
+| 供应商 | Base URL | 说明 |
+|--------|----------|------|
+| 小米官方 | `https://api.xiaomimimo.com/v1` | 小米平台直接访问 |
+| Token Plan | `https://token-plan-cn.xiaomimimo.com/v1` | Token Plan 端点 |
+| 自定义 | 用户输入 | 任意 OpenAI 兼容端点 |
 
-## Project Structure
+## 项目结构
 
 ```
 xiaomi-mimo-tts-webui/
-├── app.py              # Main application (Flask + inline frontend)
-├── mimo_tts_example.py # API usage examples
-├── requirements.txt    # Python dependencies
-├── start.bat           # Windows one-click launcher
-├── start.sh            # Linux/macOS one-click launcher
-├── build.py            # Build script for generating .exe
-├── LICENSE             # MIT License
-└── README.md           # This file
+├── app.py              # 主应用（Flask + 内嵌前端）
+├── mimo_tts_example.py # API 调用示例
+├── requirements.txt    # Python 依赖
+├── start.bat           # Windows 一键启动
+├── start.sh            # Linux/macOS 一键启动
+├── build.py            # EXE 打包脚本
+├── LICENSE             # MIT 开源协议
+└── README.md           # 本文件
 ```
 
-## Tech Stack
+## 技术栈
 
-- **Backend**: Python, Flask, OpenAI SDK
-- **Frontend**: Vanilla HTML/CSS/JS (single-file SPA)
-- **Audio Processing**: pydub (for multi-file concatenation)
-- **API**: MiMo-V2.5-TTS (OpenAI-compatible format)
+- **后端**: Python, Flask, OpenAI SDK
+- **前端**: 原生 HTML/CSS/JS（单文件 SPA）
+- **音频处理**: pydub（多文件拼接）
+- **API**: MiMo-V2.5-TTS（OpenAI 兼容格式）
 
-## Known Limitations
+## 已知限制
 
-- Reference audio must be under 10MB (after merging)
-- Supports mp3 and wav formats only
-- Voice cloning quality depends on reference audio quality and length
-- API is currently free for a limited time (as of 2026)
+- 参考音频合并后不能超过 10MB
+- 仅支持 mp3 和 wav 格式
+- 克隆效果取决于参考音频的质量和时长
+- API 目前限时免费（截至 2026 年）
 
-## License
+## 开源协议
 
 [MIT License](LICENSE)
 
-## Links
+## 相关链接
 
-- [MiMo API Platform](https://platform.xiaomimimo.com)
-- [MiMo TTS Documentation](https://platform.xiaomimimo.com/docs/usage-guide/speech-synthesis-v2.5)
-- [Report Issues](https://github.com/tangyucheng6420/xiaomi-mimo-tts-webui/issues)
+- [小米 MiMo API 平台](https://platform.xiaomimimo.com)
+- [MiMo TTS 文档](https://platform.xiaomimimo.com/docs/usage-guide/speech-synthesis-v2.5)
+- [反馈问题](https://github.com/tangyucheng6420/xiaomi-mimo-tts-webui/issues)

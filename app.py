@@ -1,7 +1,6 @@
 """
-Xiaomi MiMo-V2.5-TTS Voice Clone WebUI (Flask)
-Production-ready voice cloning web application with multi-provider support.
-GitHub: https://github.com/tangyucheng6420/xiaomi-mimo-tts-webui
+小米 MiMo-V2.5-TTS 语音克隆 WebUI (Flask)
+支持多参考音频上传、精细参数控制、批量生成、多供应商端点
 """
 
 import base64
@@ -9,13 +8,14 @@ import io
 import os
 import tempfile
 import atexit
+import json as _json
 from flask import Flask, render_template_string, request, send_file, jsonify
 from openai import OpenAI
 from pydub import AudioSegment
 
 app = Flask(__name__)
 
-# Track temp output files for cleanup
+# 临时文件追踪与清理
 _temp_files = []
 
 def _cleanup_temps():
@@ -28,10 +28,10 @@ def _cleanup_temps():
 
 atexit.register(_cleanup_temps)
 
-# Provider endpoints
+# 供应商端点
 PROVIDERS = [
-    {"name": "MiMo Official", "url": "https://api.xiaomimimo.com/v1", "model": "mimo-v2.5-tts-voiceclone"},
-    {"name": "Token Plan CN", "url": "https://token-plan-cn.xiaomimimo.com/v1", "model": "mimo-v2.5-tts-voiceclone"},
+    {"name": "小米官方", "url": "https://api.xiaomimimo.com/v1", "model": "mimo-v2.5-tts-voiceclone"},
+    {"name": "Token Plan", "url": "https://token-plan-cn.xiaomimimo.com/v1", "model": "mimo-v2.5-tts-voiceclone"},
 ]
 
 HTML = """
@@ -40,10 +40,10 @@ HTML = """
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Xiaomi MiMo TTS Voice Clone</title>
+    <title>小米 MiMo 语音克隆</title>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f0f2f5; min-height: 100vh; padding: 16px; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', sans-serif; background: #f0f2f5; min-height: 100vh; padding: 16px; }
         .container { max-width: 1200px; margin: 0 auto; }
         h1 { text-align: center; color: #1a1a1a; margin-bottom: 4px; font-size: 26px; }
         .subtitle { text-align: center; color: #888; margin-bottom: 24px; font-size: 13px; }
@@ -148,9 +148,9 @@ HTML = """
 </head>
 <body>
     <div class="container">
-        <h1>Xiaomi MiMo TTS Voice Clone</h1>
+        <h1>小米 MiMo 语音克隆</h1>
         <p class="subtitle">
-            Multi-reference audio merge clone | Fine-grained parameter control | Batch generation
+            多段参考音频合并克隆 | 精细参数控制 | 批量生成
             &nbsp;|&nbsp;
             <a href="https://github.com/tangyucheng6420/xiaomi-mimo-tts-webui" target="_blank">GitHub</a>
         </p>
@@ -159,14 +159,14 @@ HTML = """
             <div class="row">
                 <div class="col">
                     <div class="card">
-                        <h3>API Configuration</h3>
-                        <label>API Provider</label>
+                        <h3>API 配置</h3>
+                        <label>API 供应商</label>
                         <div class="endpoint-row">
                             <div class="endpoint-select">
                                 <select id="endpointSelect" onchange="onEndpointChange()">
-                                    <option value="0">MiMo Official</option>
-                                    <option value="1">Token Plan CN</option>
-                                    <option value="custom">Custom Endpoint</option>
+                                    <option value="0">小米官方</option>
+                                    <option value="1">Token Plan</option>
+                                    <option value="custom">自定义端点</option>
                                 </select>
                             </div>
                             <div class="endpoint-custom" id="customUrlWrap" style="display:none;">
@@ -178,42 +178,42 @@ HTML = """
                         <div style="margin-top: 14px;">
                             <label>API Key</label>
                             <div class="api-key-row">
-                                <input type="password" id="apiKey" placeholder="Enter your MiMo API Key" required>
-                                <button type="button" class="btn-sm" onclick="toggleKeyVisibility()" id="eyeBtn">Show</button>
-                                <button type="button" class="btn-sm" onclick="clearSavedKey()">Clear</button>
+                                <input type="password" id="apiKey" placeholder="输入你的 MiMo API Key" required>
+                                <button type="button" class="btn-sm" onclick="toggleKeyVisibility()" id="eyeBtn">显示</button>
+                                <button type="button" class="btn-sm" onclick="clearSavedKey()">清除</button>
                             </div>
-                            <div class="hint">Key is saved locally in your browser (localStorage)</div>
+                            <div class="hint">Key 保存在浏览器本地 (localStorage)，不会上传到服务器</div>
                         </div>
 
                         <div style="margin-top: 14px;">
-                            <label>Reference Audio (multiple allowed)</label>
+                            <label>参考音频（可上传多个）</label>
                             <div class="audio-upload" id="dropZone">
                                 <div class="icon">&#127908;</div>
-                                <div style="font-size:13px;">Click or drag audio files here</div>
-                                <div class="hint">Supports mp3 / wav, multiple files auto-merged</div>
+                                <div style="font-size:13px;">点击选择或拖拽音频文件到此处</div>
+                                <div class="hint">支持 mp3 / wav，可多选，会自动拼接</div>
                                 <input type="file" id="audioFile" accept=".mp3,.wav,.wave" multiple>
                             </div>
                             <div class="file-list" id="fileList"></div>
                             <div class="merge-hint" id="mergeHint" style="display:none;">
-                                Multiple files will be concatenated in order before sending
+                                多个文件将按顺序拼接为一段完整音频后发送
                             </div>
                         </div>
 
                         <div style="margin-top: 14px;">
-                            <label>Output Format</label>
+                            <label>输出格式</label>
                             <select id="format">
-                                <option value="wav">WAV (Recommended)</option>
+                                <option value="wav">WAV (推荐)</option>
                                 <option value="pcm16">PCM16</option>
                             </select>
                         </div>
                     </div>
 
                     <div class="card">
-                        <h3>Parameters</h3>
+                        <h3>参数调节</h3>
                         <div class="preset-btns">
-                            <span class="preset-btn active" onclick="applyPreset('stable')">Stable</span>
-                            <span class="preset-btn" onclick="applyPreset('balanced')">Balanced</span>
-                            <span class="preset-btn" onclick="applyPreset('creative')">Creative</span>
+                            <span class="preset-btn active" onclick="applyPreset('stable')">稳定模式</span>
+                            <span class="preset-btn" onclick="applyPreset('balanced')">均衡模式</span>
+                            <span class="preset-btn" onclick="applyPreset('creative')">创意模式</span>
                         </div>
 
                         <div class="param-row">
@@ -221,7 +221,7 @@ HTML = """
                                 <label>temperature <span class="slider-val" id="tempVal">0.3</span></label>
                                 <input type="range" id="temperature" min="0" max="1.5" step="0.05" value="0.3"
                                        oninput="document.getElementById('tempVal').textContent=this.value">
-                                <div class="hint">Lower = more consistent (TTS default 0.6)</div>
+                                <div class="hint">越低越稳定一致 (TTS 默认 0.6)</div>
                             </div>
                         </div>
                         <div class="param-row">
@@ -229,26 +229,26 @@ HTML = """
                                 <label>top_p <span class="slider-val" id="toppVal">0.8</span></label>
                                 <input type="range" id="topP" min="0.01" max="1.0" step="0.01" value="0.8"
                                        oninput="document.getElementById('toppVal').textContent=this.value">
-                                <div class="hint">Lower = more deterministic (default 0.95)</div>
+                                <div class="hint">越低越确定 (默认 0.95)</div>
                             </div>
                         </div>
                         <div class="param-row">
                             <div class="param-col">
-                                <label>seed</label>
-                                <input type="number" id="seed" placeholder="Empty = random, number = reproducible" min="0">
-                                <div class="hint">Fixed seed for reproducible results</div>
+                                <label>seed (随机种子)</label>
+                                <input type="number" id="seed" placeholder="留空=随机，填数字=可复现" min="0">
+                                <div class="hint">固定种子可复现相同结果</div>
                             </div>
                         </div>
                         <div class="param-row">
                             <div class="param-col">
-                                <label>Batch Count</label>
+                                <label>批量生成次数</label>
                                 <select id="batchCount">
-                                    <option value="1">1</option>
-                                    <option value="2">2</option>
-                                    <option value="3" selected>3</option>
-                                    <option value="5">5</option>
+                                    <option value="1">1 次</option>
+                                    <option value="2">2 次</option>
+                                    <option value="3" selected>3 次</option>
+                                    <option value="5">5 次</option>
                                 </select>
-                                <div class="hint">Generate multiple and pick the best</div>
+                                <div class="hint">多生成几次挑最好的</div>
                             </div>
                         </div>
                     </div>
@@ -256,36 +256,36 @@ HTML = """
 
                 <div class="col">
                     <div class="card">
-                        <h3>Voice Content</h3>
-                        <label>Style Instruction (optional)</label>
-                        <textarea id="instruction" rows="3" placeholder="Describe desired tone/style, e.g.:&#10;Speak in a gentle voice, slightly slow&#10;Mimic the speaker's tone from the reference audio"></textarea>
+                        <h3>语音内容</h3>
+                        <label>风格指令（可选）</label>
+                        <textarea id="instruction" rows="3" placeholder="描述想要的语气风格，如：&#10;用温柔的语气说话，语速稍慢&#10;模仿参考音频中说话人的语气"></textarea>
 
                         <div style="margin-top: 14px;">
-                            <label>Text to Synthesize</label>
-                            <textarea id="text" rows="6" placeholder="Enter text to synthesize...&#10;Use (tags) to control emotion"></textarea>
+                            <label>要合成的文本</label>
+                            <textarea id="text" rows="6" placeholder="输入要合成的文本...&#10;可以用 (标签) 控制情绪"></textarea>
                             <div class="tags">
-                                <span class="tag" onclick="insertTag(this)">(Happy)</span>
-                                <span class="tag" onclick="insertTag(this)">(Sad)</span>
-                                <span class="tag" onclick="insertTag(this)">(Angry)</span>
-                                <span class="tag" onclick="insertTag(this)">(Gentle)</span>
-                                <span class="tag" onclick="insertTag(this)">(Low voice)</span>
-                                <span class="tag" onclick="insertTag(this)">(Sigh)</span>
-                                <span class="tag" onclick="insertTag(this)">(Laugh)</span>
-                                <span class="tag" onclick="insertTag(this)">(Whisper)</span>
-                                <span class="tag" onclick="insertTag(this)">(Crying)</span>
-                                <span class="tag" onclick="insertTag(this)">(Faster)</span>
-                                <span class="tag" onclick="insertTag(this)">(Pause)</span>
-                                <span class="tag" onclick="insertTag(this)">(Deep breath)</span>
+                                <span class="tag" onclick="insertTag(this)">(开心)</span>
+                                <span class="tag" onclick="insertTag(this)">(悲伤)</span>
+                                <span class="tag" onclick="insertTag(this)">(愤怒)</span>
+                                <span class="tag" onclick="insertTag(this)">(温柔)</span>
+                                <span class="tag" onclick="insertTag(this)">(低沉)</span>
+                                <span class="tag" onclick="insertTag(this)">(叹气)</span>
+                                <span class="tag" onclick="insertTag(this)">(笑声)</span>
+                                <span class="tag" onclick="insertTag(this)">(低声)</span>
+                                <span class="tag" onclick="insertTag(this)">(哭泣)</span>
+                                <span class="tag" onclick="insertTag(this)">(语速加快)</span>
+                                <span class="tag" onclick="insertTag(this)">(突然停顿)</span>
+                                <span class="tag" onclick="insertTag(this)">(深呼吸)</span>
                             </div>
                         </div>
 
                         <div style="margin-top: 16px;">
-                            <button type="submit" class="btn" id="submitBtn">Generate Voice</button>
+                            <button type="submit" class="btn" id="submitBtn">生成语音</button>
                         </div>
                     </div>
 
                     <div class="card" id="resultCard" style="display:none;">
-                        <h3>Results</h3>
+                        <h3>生成结果</h3>
                         <div class="results-grid" id="resultsGrid"></div>
                     </div>
                 </div>
@@ -294,22 +294,22 @@ HTML = """
 
         <div class="loading" id="loading">
             <div class="spinner"></div>
-            <div id="loadingText">Generating voice (1/1)...</div>
+            <div id="loadingText">正在生成语音 (1/1)...</div>
         </div>
         <div class="error" id="errorMsg"></div>
 
         <div class="footer">
             <a href="https://github.com/tangyucheng6420/xiaomi-mimo-tts-webui" target="_blank">Xiaomi MiMo TTS Voice Clone</a>
-            &nbsp;&middot;&nbsp; Powered by MiMo-V2.5-TTS
-            &nbsp;&middot;&nbsp; <a href="https://platform.xiaomimimo.com" target="_blank">Get API Key</a>
+            &nbsp;&middot;&nbsp; 基于 MiMo-V2.5-TTS
+            &nbsp;&middot;&nbsp; <a href="https://platform.xiaomimimo.com" target="_blank">获取 API Key</a>
         </div>
     </div>
 
     <script>
-        // === Provider endpoints ===
+        // === 供应商端点 ===
         const providers = PROVIDERS_JSON;
 
-        // === localStorage helpers ===
+        // === localStorage ===
         const LS_KEY_APIKEY = 'mimo_tts_apikey';
         const LS_KEY_ENDPOINT = 'mimo_tts_endpoint';
         const LS_KEY_CUSTOM_URL = 'mimo_tts_custom_url';
@@ -343,8 +343,8 @@ HTML = """
         function toggleKeyVisibility() {
             const inp = document.getElementById('apiKey');
             const btn = document.getElementById('eyeBtn');
-            if (inp.type === 'password') { inp.type = 'text'; btn.textContent = 'Hide'; }
-            else { inp.type = 'password'; btn.textContent = 'Show'; }
+            if (inp.type === 'password') { inp.type = 'text'; btn.textContent = '隐藏'; }
+            else { inp.type = 'password'; btn.textContent = '显示'; }
         }
 
         function getBaseUrl() {
@@ -359,7 +359,7 @@ HTML = """
             const wrap = document.getElementById('customUrlWrap');
             if (sel === 'custom') {
                 wrap.style.display = 'block';
-                hint.textContent = 'Enter your custom base URL';
+                hint.textContent = '请输入自定义 base URL';
             } else {
                 wrap.style.display = 'none';
                 hint.textContent = providers[parseInt(sel)].url;
@@ -367,7 +367,7 @@ HTML = """
             saveSettings();
         }
 
-        // === Audio file management ===
+        // === 音频文件管理 ===
         let uploadedFiles = [];
         const audioInput = document.getElementById('audioFile');
         const dropZone = document.getElementById('dropZone');
@@ -429,7 +429,7 @@ HTML = """
                     <span style="color:#4a90d9;font-weight:600;">${i+1}</span>
                     <span class="fname">${f.name}</span>
                     <span class="fsize">${mb} MB</span>
-                    <button class="fdel" onclick="removeFile(${i})" title="Remove">&times;</button>
+                    <button class="fdel" onclick="removeFile(${i})" title="移除">&times;</button>
                 `;
                 fileList.appendChild(div);
             });
@@ -444,7 +444,7 @@ HTML = """
             textarea.selectionStart = textarea.selectionEnd = s + tag.length + 1;
         }
 
-        // === Form submit ===
+        // === 表单提交 ===
         document.getElementById('form').addEventListener('submit', async function(e) {
             e.preventDefault();
             const apiKey = document.getElementById('apiKey').value;
@@ -457,10 +457,10 @@ HTML = """
             const batch = parseInt(document.getElementById('batchCount').value);
             const baseUrl = getBaseUrl();
 
-            if (!apiKey) { showError('Please enter your API Key'); return; }
-            if (!baseUrl) { showError('Please select or enter an API endpoint'); return; }
-            if (uploadedFiles.length === 0) { showError('Please upload at least one reference audio'); return; }
-            if (!text.trim()) { showError('Please enter text to synthesize'); return; }
+            if (!apiKey) { showError('请填写 API Key'); return; }
+            if (!baseUrl) { showError('请选择或输入 API 端点'); return; }
+            if (uploadedFiles.length === 0) { showError('请上传至少一个参考音频'); return; }
+            if (!text.trim()) { showError('请输入要合成的文本'); return; }
 
             saveSettings();
             showLoading(true); hideError();
@@ -469,7 +469,7 @@ HTML = """
 
             const results = [];
             for (let i = 0; i < batch; i++) {
-                document.getElementById('loadingText').textContent = `Generating voice (${i+1}/${batch})...`;
+                document.getElementById('loadingText').textContent = `正在生成语音 (${i+1}/${batch})...`;
                 const fd = new FormData();
                 fd.append('api_key', apiKey);
                 fd.append('base_url', baseUrl);
@@ -486,7 +486,7 @@ HTML = """
                     if (!resp.ok) { const err = await resp.json(); throw new Error(err.error); }
                     results.push(URL.createObjectURL(await resp.blob()));
                 } catch (err) {
-                    showError(`Batch ${i+1} failed: ${err.message}`); break;
+                    showError(`第 ${i+1} 次失败: ${err.message}`); break;
                 }
             }
 
@@ -495,7 +495,7 @@ HTML = """
                 results.forEach((url, idx) => {
                     const d = document.createElement('div');
                     d.className = 'result-item';
-                    d.innerHTML = `<span class="idx">#${idx+1}</span><audio controls src="${url}"></audio><a href="${url}" download="clone_${idx+1}.wav" class="download-btn">Download</a>`;
+                    d.innerHTML = `<span class="idx">#${idx+1}</span><audio controls src="${url}"></audio><a href="${url}" download="clone_${idx+1}.wav" class="download-btn">下载</a>`;
                     grid.appendChild(d);
                 });
                 document.getElementById('resultCard').style.display = 'block';
@@ -507,15 +507,13 @@ HTML = """
         function showError(m) { const el = document.getElementById('errorMsg'); el.textContent = m; el.classList.add('show'); }
         function hideError() { document.getElementById('errorMsg').classList.remove('show'); }
 
-        // === Init ===
+        // === 初始化 ===
         document.addEventListener('DOMContentLoaded', loadSaved);
     </script>
 </body>
 </html>
 """
 
-# Inject provider data into HTML
-import json as _json
 HTML = HTML.replace("PROVIDERS_JSON", _json.dumps(PROVIDERS, ensure_ascii=False))
 
 
@@ -536,30 +534,28 @@ def api_clone():
     seed = request.form.get("seed", "").strip()
 
     if not api_key:
-        return jsonify({"error": "API Key is required"}), 400
+        return jsonify({"error": "请填写 API Key"}), 400
     if not base_url:
-        return jsonify({"error": "API endpoint is required"}), 400
+        return jsonify({"error": "请选择或输入 API 端点"}), 400
     if not text:
-        return jsonify({"error": "Text to synthesize is required"}), 400
+        return jsonify({"error": "请输入要合成的文本"}), 400
 
     audio_files = request.files.getlist("audio")
     if not audio_files or not audio_files[0].filename:
-        return jsonify({"error": "Please upload at least one reference audio"}), 400
+        return jsonify({"error": "请上传参考音频"}), 400
 
     tmp_files = []
     tmp_out = None
     try:
-        # Save uploaded audio files
         for af in audio_files:
             ext = os.path.splitext(af.filename)[1].lower()
             if ext not in (".mp3", ".wav", ".wave"):
-                return jsonify({"error": f"Unsupported format: {af.filename}"}), 400
+                return jsonify({"error": f"不支持的格式: {af.filename}"}), 400
             tmp = tempfile.NamedTemporaryFile(delete=False, suffix=ext)
             af.save(tmp.name)
             tmp.close()
             tmp_files.append(tmp.name)
 
-        # Concatenate multiple audio files
         if len(tmp_files) == 1:
             with open(tmp_files[0], "rb") as f:
                 voice_bytes = f.read()
@@ -577,7 +573,7 @@ def api_clone():
 
         size_mb = len(voice_bytes) / (1024 * 1024)
         if size_mb > 10:
-            return jsonify({"error": f"Merged audio too large ({size_mb:.1f}MB), max 10MB. Reduce files or duration."}), 400
+            return jsonify({"error": f"拼接后音频过大 ({size_mb:.1f}MB)，最大 10MB。请减少时长或文件数。"}), 400
 
         voice_b64 = base64.b64encode(voice_bytes).decode("utf-8")
 
@@ -612,11 +608,11 @@ def api_clone():
     except Exception as e:
         msg = str(e)
         if "401" in msg or "Unauthorized" in msg.lower():
-            return jsonify({"error": "Invalid API Key. Please check your key at platform.xiaomimimo.com"}), 401
+            return jsonify({"error": "API Key 无效，请在 platform.xiaomimimo.com 检查你的 Key"}), 401
         if "429" in msg or "rate" in msg.lower():
-            return jsonify({"error": "Rate limited. Please wait and try again."}), 429
+            return jsonify({"error": "请求频率过高，请稍后再试"}), 429
         if "timeout" in msg.lower() or "connect" in msg.lower():
-            return jsonify({"error": f"Network error: {msg}. Check your connection and endpoint URL."}), 502
+            return jsonify({"error": f"网络错误: {msg}。请检查网络连接和端点地址。"}), 502
         return jsonify({"error": msg}), 500
     finally:
         for f in tmp_files:
@@ -628,7 +624,7 @@ def api_clone():
 
 if __name__ == "__main__":
     print("=" * 50)
-    print("  Xiaomi MiMo TTS Voice Clone")
+    print("  小米 MiMo 语音克隆")
     print("  http://localhost:7860")
     print("=" * 50)
     app.run(host="0.0.0.0", port=7860, debug=False)
