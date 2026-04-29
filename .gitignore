@@ -13,3 +13,5 @@ build/
 Thumbs.db
 *.spec
 stats.db
+app_full.py
+.env
