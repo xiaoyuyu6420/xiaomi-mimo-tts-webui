@@ -154,6 +154,139 @@ PROVIDERS = [
     {"name": "Token Plan", "url": "https://token-plan-cn.xiaomimimo.com/v1"},
 ]
 
+# ============ 管理后台 HTML ============
+ADMIN_DASHBOARD_HTML = """
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>管理后台 - MiMo 语音克隆</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', sans-serif; background: #f0f2f5; min-height: 100vh; padding: 20px; }
+        .container { max-width: 1100px; margin: 0 auto; }
+        h1 { font-size: 22px; color: #1a1a1a; margin-bottom: 20px; }
+        h1 a { color: #4a90d9; text-decoration: none; font-size: 13px; font-weight: normal; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-bottom: 24px; }
+        .stat-card { background: #fff; border-radius: 10px; padding: 18px; box-shadow: 0 1px 4px rgba(0,0,0,0.06); }
+        .stat-card .label { font-size: 12px; color: #888; margin-bottom: 4px; }
+        .stat-card .value { font-size: 26px; font-weight: 700; color: #1a1a1a; }
+        .stat-card .sub { font-size: 11px; color: #aaa; margin-top: 2px; }
+        .section { background: #fff; border-radius: 10px; padding: 20px; box-shadow: 0 1px 4px rgba(0,0,0,0.06); margin-bottom: 16px; }
+        .section h2 { font-size: 15px; color: #333; margin-bottom: 14px; }
+        .chart { display: flex; align-items: flex-end; gap: 6px; height: 160px; padding-top: 10px; }
+        .bar-group { flex: 1; display: flex; flex-direction: column; align-items: center; height: 100%; justify-content: flex-end; }
+        .bar-pair { display: flex; gap: 2px; align-items: flex-end; width: 100%; justify-content: center; }
+        .bar { width: 16px; border-radius: 3px 3px 0 0; min-height: 2px; transition: height 0.3s; }
+        .bar.views { background: #4a90d9; }
+        .bar.calls { background: #34c759; }
+        .bar-label { font-size: 10px; color: #999; margin-top: 6px; }
+        .legend { display: flex; gap: 16px; margin-bottom: 10px; font-size: 12px; color: #666; }
+        .legend span::before { content: ''; display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; }
+        .legend .l-views::before { background: #4a90d9; }
+        .legend .l-calls::before { background: #34c759; }
+        table { width: 100%; border-collapse: collapse; font-size: 12px; }
+        th { text-align: left; padding: 8px; background: #f8f9fa; color: #666; font-weight: 600; border-bottom: 1px solid #eee; }
+        td { padding: 8px; border-bottom: 1px solid #f5f5f5; color: #333; }
+        tr:hover td { background: #fafbfc; }
+        .tag { display: inline-block; padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: 600; }
+        .tag.ok { background: #e8f5e9; color: #2e7d32; }
+        .tag.fail { background: #fce4ec; color: #c62828; }
+        .actions { display: flex; gap: 8px; margin-bottom: 16px; }
+        .actions a { padding: 6px 14px; background: #4a90d9; color: #fff; border-radius: 6px; text-decoration: none; font-size: 12px; }
+        .actions a:hover { background: #357abd; }
+        .actions a.secondary { background: #f5f5f5; color: #666; }
+        .actions a.secondary:hover { background: #e8e8e8; }
+        .empty { text-align: center; color: #bbb; padding: 30px; font-size: 13px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>管理后台 <a href="/">返回首页</a></h1>
+
+        <div class="grid">
+            <div class="stat-card">
+                <div class="label">总访问量</div>
+                <div class="value">{{ total_page_views }}</div>
+                <div class="sub">今日 {{ today_page_views }}</div>
+            </div>
+            <div class="stat-card">
+                <div class="label">API 调用</div>
+                <div class="value">{{ total_api_calls }}</div>
+                <div class="sub">今日 {{ today_api_calls }}</div>
+            </div>
+            <div class="stat-card">
+                <div class="label">独立访客</div>
+                <div class="value">{{ unique_visitors }}</div>
+                <div class="sub">按 IP 统计</div>
+            </div>
+            <div class="stat-card">
+                <div class="label">失败请求</div>
+                <div class="value" style="color:{{ '#e74c3c' if total_errors > 0 else '#1a1a1a' }}">{{ total_errors }}</div>
+                <div class="sub">运行 {{ uptime }}</div>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>最近 7 天趋势</h2>
+            <div class="legend">
+                <span class="l-views">页面访问</span>
+                <span class="l-calls">API 调用</span>
+            </div>
+            <div class="chart" id="chart"></div>
+        </div>
+
+        <div class="actions">
+            <a href="/admin/export/page_views">导出访问记录 CSV</a>
+            <a href="/admin/export/api_calls">导出 API 记录 CSV</a>
+            <a href="/admin/stats?format=json" class="secondary">查看 JSON</a>
+        </div>
+
+        <div class="section">
+            <h2>最近 API 调用</h2>
+            {% if recent_calls %}
+            <table>
+                <tr><th>时间</th><th>IP</th><th>状态</th><th>耗时</th><th>错误</th></tr>
+                {% for c in recent_calls[:30] %}
+                <tr>
+                    <td>{{ c.ts[:19] }}</td>
+                    <td>{{ c.ip }}</td>
+                    <td><span class="tag {{ 'ok' if c.success else 'fail' }}">{{ '成功' if c.success else '失败' }}</span></td>
+                    <td>{{ c.duration }}s</td>
+                    <td>{{ c.error or '-' }}</td>
+                </tr>
+                {% endfor %}
+            </table>
+            {% else %}
+            <div class="empty">暂无 API 调用记录</div>
+            {% endif %}
+        </div>
+    </div>
+
+    <script>
+        const daily = {{ daily | safe }};
+        const maxVal = Math.max(...daily.map(d => Math.max(d.views, d.calls)), 1);
+        const chart = document.getElementById('chart');
+        daily.forEach(d => {
+            const g = document.createElement('div');
+            g.className = 'bar-group';
+            const vH = Math.round((d.views / maxVal) * 130);
+            const cH = Math.round((d.calls / maxVal) * 130);
+            g.innerHTML = `
+                <div class="bar-pair">
+                    <div class="bar views" style="height:${vH}px" title="访问 ${d.views}"></div>
+                    <div class="bar calls" style="height:${cH}px" title="API ${d.calls}"></div>
+                </div>
+                <div class="bar-label">${d.date.slice(5)}</div>
+            `;
+            chart.appendChild(g);
+        });
+    </script>
+</body>
+</html>
+"""
+
 # ============ HTML ============
 HTML = """
 <!DOCTYPE html>
@@ -723,7 +856,6 @@ def admin_stats():
     views_today = db.execute("SELECT COUNT(*) FROM page_views WHERE ts LIKE ?", (today + "%",)).fetchone()[0]
     calls_today = db.execute("SELECT COUNT(*) FROM api_calls WHERE ts LIKE ?", (today + "%",)).fetchone()[0]
 
-    # 最近 7 天每日统计
     daily = []
     for i in range(6, -1, -1):
         d = (datetime.utcnow() - timedelta(days=i)).strftime("%Y-%m-%d")
@@ -731,12 +863,32 @@ def admin_stats():
         c = db.execute("SELECT COUNT(*) FROM api_calls WHERE ts LIKE ?", (d + "%",)).fetchone()[0]
         daily.append({"date": d, "views": v, "calls": c})
 
-    # 独立访客数
     unique_ips = db.execute("SELECT COUNT(DISTINCT ip) FROM page_views").fetchone()[0]
+
+    # 最近 50 条 API 调用
+    recent = db.execute("SELECT ts, ip, success, error, duration FROM api_calls ORDER BY id DESC LIMIT 50").fetchall()
+    recent_calls = [{"ts": r[0], "ip": r[1], "success": bool(r[2]), "error": r[3], "duration": round(r[4], 2)} for r in recent]
 
     db.close()
 
-    return jsonify({
+    # 检查是否请求 JSON
+    if request.args.get("format") == "json":
+        return jsonify({
+            "uptime": f"{hours}h {mins}m {secs}s",
+            "total_page_views": total_views,
+            "total_api_calls": total_calls,
+            "total_errors": total_errors,
+            "unique_visitors": unique_ips,
+            "today_page_views": views_today,
+            "today_api_calls": calls_today,
+            "daily": daily,
+            "recent_calls": recent_calls,
+            "rate_limit": f"{RATE_LIMIT}/min",
+            "max_files": MAX_FILES,
+            "max_file_size": f"{MAX_FILE_SIZE_MB}MB",
+        })
+
+    return render_template_string(ADMIN_DASHBOARD_HTML, **{
         "uptime": f"{hours}h {mins}m {secs}s",
         "total_page_views": total_views,
         "total_api_calls": total_calls,
@@ -744,7 +896,8 @@ def admin_stats():
         "unique_visitors": unique_ips,
         "today_page_views": views_today,
         "today_api_calls": calls_today,
-        "daily": daily,
+        "daily": _json.dumps(daily),
+        "recent_calls": recent_calls,
         "rate_limit": f"{RATE_LIMIT}/min",
         "max_files": MAX_FILES,
         "max_file_size": f"{MAX_FILE_SIZE_MB}MB",
