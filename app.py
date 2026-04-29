@@ -1,21 +1,81 @@
 """
 小米 MiMo-V2.5-TTS 语音克隆 WebUI (Flask)
 支持多参考音频上传、精细参数控制、批量生成、多供应商端点
+生产环境：SEO / 限流 / 分析 / 安全头 / 管理员认证
 """
 
 import base64
 import io
 import os
+import time
 import tempfile
 import atexit
+import threading
 import json as _json
-from flask import Flask, render_template_string, request, send_file, jsonify
+from collections import defaultdict
+from functools import wraps
+
+from flask import Flask, render_template_string, request, send_file, jsonify, Response
 from openai import OpenAI
 from pydub import AudioSegment
 
-app = Flask(__name__)
+# 环境变量
+from dotenv import load_dotenv
+load_dotenv()
 
-# 临时文件追踪与清理
+app = Flask(__name__)
+app.secret_key = os.environ.get("SECRET_KEY", os.urandom(24).hex())
+
+# ============ 配置 ============
+ADMIN_USER = os.environ.get("ADMIN_USER", "")
+ADMIN_PASS = os.environ.get("ADMIN_PASS", "")
+GA_ID = os.environ.get("GA_ID", "")
+MAX_FILES = int(os.environ.get("MAX_FILES", "5"))
+MAX_FILE_SIZE_MB = int(os.environ.get("MAX_FILE_SIZE_MB", "5"))
+MAX_TOTAL_SIZE_MB = int(os.environ.get("MAX_TOTAL_SIZE_MB", "10"))
+RATE_LIMIT = int(os.environ.get("RATE_LIMIT", "10"))  # 每分钟请求数
+
+# ============ 安全头 ============
+@app.after_request
+def security_headers(response):
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "SAMEORIGIN"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    return response
+
+# ============ 简易限流 ============
+_rate_lock = threading.Lock()
+_rate_data = defaultdict(list)
+
+def _check_rate_limit(ip):
+    now = time.time()
+    with _rate_lock:
+        _rate_data[ip] = [t for t in _rate_data[ip] if now - t < 60]
+        if len(_rate_data[ip]) >= RATE_LIMIT:
+            return False
+        _rate_data[ip].append(now)
+    return True
+
+@app.before_request
+def rate_limit_check():
+    if request.path.startswith("/api/"):
+        if not _check_rate_limit(request.remote_addr):
+            return jsonify({"error": "请求过于频繁，请稍后再试"}), 429
+
+# ============ 管理员认证 ============
+def admin_required(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if not ADMIN_USER:
+            return jsonify({"error": "管理员未配置"}), 403
+        auth = request.authorization
+        if not auth or auth.username != ADMIN_USER or auth.password != ADMIN_PASS:
+            return Response("需要管理员认证", 401, {"WWW-Authenticate": 'Basic realm="Admin"'})
+        return f(*args, **kwargs)
+    return decorated
+
+# ============ 临时文件清理 ============
 _temp_files = []
 
 def _cleanup_temps():
@@ -28,11 +88,26 @@ def _cleanup_temps():
 
 atexit.register(_cleanup_temps)
 
-# 供应商端点
+# ============ 统计 ============
+_stats = {"total_requests": 0, "total_errors": 0, "start_time": time.time()}
+
+# ============ 供应商端点 ============
 PROVIDERS = [
-    {"name": "小米官方", "url": "https://api.xiaomimimo.com/v1", "model": "mimo-v2.5-tts-voiceclone"},
-    {"name": "Token Plan", "url": "https://token-plan-cn.xiaomimimo.com/v1", "model": "mimo-v2.5-tts-voiceclone"},
+    {"name": "小米官方", "url": "https://api.xiaomimimo.com/v1"},
+    {"name": "Token Plan", "url": "https://token-plan-cn.xiaomimimo.com/v1"},
 ]
+
+# ============ HTML ============
+GA_SCRIPT = """
+<!-- Google Analytics -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=GA_ID_PLACEHOLDER"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+  gtag('config', 'GA_ID_PLACEHOLDER');
+</script>
+""" if GA_ID else ""
 
 HTML = """
 <!DOCTYPE html>
@@ -40,7 +115,27 @@ HTML = """
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>小米 MiMo 语音克隆</title>
+    <title>小米 MiMo 语音克隆 - AI 语音克隆在线工具</title>
+    <meta name="description" content="基于小米 MiMo-V2.5-TTS 的在线语音克隆工具。上传参考音频，输入文本，一键生成克隆语音。支持多参考音频、精细参数控制、批量生成。">
+    <meta name="keywords" content="语音克隆, AI 语音, MiMo TTS, 小米语音合成, 声音克隆, text to speech, voice clone">
+    <meta name="robots" content="index, follow">
+    <link rel="canonical" href="https://mimo-tts.example.com/">
+
+    <!-- Open Graph -->
+    <meta property="og:type" content="website">
+    <meta property="og:title" content="小米 MiMo 语音克隆">
+    <meta property="og:description" content="基于小米 MiMo-V2.5-TTS 的在线语音克隆工具。上传音频，输入文本，一键克隆。">
+    <meta property="og:url" content="https://mimo-tts.example.com/">
+    <meta property="og:site_name" content="MiMo Voice Clone">
+    <meta property="og:locale" content="zh_CN">
+
+    <!-- Twitter Card -->
+    <meta name="twitter:card" content="summary">
+    <meta name="twitter:title" content="小米 MiMo 语音克隆">
+    <meta name="twitter:description" content="基于小米 MiMo-V2.5-TTS 的在线语音克隆工具">
+
+    GA_SCRIPT_PLACEHOLDER
+
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', sans-serif; background: #f0f2f5; min-height: 100vh; padding: 16px; }
@@ -66,6 +161,7 @@ HTML = """
             text-align: center; cursor: pointer; transition: all 0.2s; background: #fafafa;
         }
         .audio-upload:hover { border-color: #4a90d9; background: #f5f8fc; }
+        .audio-upload.dragover { border-color: #4a90d9; background: #e8f0fe; }
         .audio-upload input { display: none; }
         .audio-upload .icon { font-size: 28px; margin-bottom: 4px; }
         .btn {
@@ -133,6 +229,7 @@ HTML = """
             font-size: 16px; padding: 0 4px;
         }
         .file-item .fdel:hover { color: #e74c3c; }
+        .file-item .ferror { color: #e74c3c; font-size: 11px; }
         .merge-hint { background: #fff8e1; border-radius: 6px; padding: 8px 10px; font-size: 11px; color: #b8860b; margin-top: 8px; }
         .endpoint-row { display: flex; gap: 8px; align-items: flex-end; }
         .endpoint-row .endpoint-select { flex: 2; }
@@ -145,6 +242,18 @@ HTML = """
         .footer a:hover { color: #4a90d9; }
         @media (max-width: 768px) { .row { flex-direction: column; } }
     </style>
+
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "WebApplication",
+      "name": "小米 MiMo 语音克隆",
+      "description": "基于小米 MiMo-V2.5-TTS 的在线语音克隆工具",
+      "applicationCategory": "MultimediaApplication",
+      "operatingSystem": "Any",
+      "offers": { "@type": "Offer", "price": "0", "priceCurrency": "CNY" }
+    }
+    </script>
 </head>
 <body>
     <div class="container">
@@ -152,10 +261,10 @@ HTML = """
         <p class="subtitle">
             多段参考音频合并克隆 | 精细参数控制 | 批量生成
             &nbsp;|&nbsp;
-            <a href="https://github.com/tangyucheng6420/xiaomi-mimo-tts-webui" target="_blank">GitHub</a>
+            <a href="https://github.com/tangyucheng6420/xiaomi-mimo-tts-webui" target="_blank" rel="noopener">GitHub</a>
         </p>
 
-        <form id="form">
+        <form id="form" novalidate>
             <div class="row">
                 <div class="col">
                     <div class="card">
@@ -178,19 +287,19 @@ HTML = """
                         <div style="margin-top: 14px;">
                             <label>API Key</label>
                             <div class="api-key-row">
-                                <input type="password" id="apiKey" placeholder="输入你的 MiMo API Key" required>
+                                <input type="password" id="apiKey" placeholder="输入你的 MiMo API Key" autocomplete="off">
                                 <button type="button" class="btn-sm" onclick="toggleKeyVisibility()" id="eyeBtn">显示</button>
                                 <button type="button" class="btn-sm" onclick="clearSavedKey()">清除</button>
                             </div>
-                            <div class="hint">Key 保存在浏览器本地 (localStorage)，不会上传到服务器</div>
+                            <div class="hint">Key 保存在浏览器本地，不会上传到服务器</div>
                         </div>
 
                         <div style="margin-top: 14px;">
-                            <label>参考音频（可上传多个）</label>
+                            <label>参考音频（最多 MAX_FILES_PLACEHOLDER 个）</label>
                             <div class="audio-upload" id="dropZone">
                                 <div class="icon">&#127908;</div>
                                 <div style="font-size:13px;">点击选择或拖拽音频文件到此处</div>
-                                <div class="hint">支持 mp3 / wav，可多选，会自动拼接</div>
+                                <div class="hint">支持 mp3 / wav，可多选，自动拼接 | 单文件最大 MAX_FILE_SIZE_PLACEHOLDER MB</div>
                                 <input type="file" id="audioFile" accept=".mp3,.wav,.wave" multiple>
                             </div>
                             <div class="file-list" id="fileList"></div>
@@ -299,44 +408,69 @@ HTML = """
         <div class="error" id="errorMsg"></div>
 
         <div class="footer">
-            <a href="https://github.com/tangyucheng6420/xiaomi-mimo-tts-webui" target="_blank">Xiaomi MiMo TTS Voice Clone</a>
+            <a href="https://github.com/tangyucheng6420/xiaomi-mimo-tts-webui" target="_blank" rel="noopener">Xiaomi MiMo TTS Voice Clone</a>
             &nbsp;&middot;&nbsp; 基于 MiMo-V2.5-TTS
-            &nbsp;&middot;&nbsp; <a href="https://platform.xiaomimimo.com" target="_blank">获取 API Key</a>
+            &nbsp;&middot;&nbsp; <a href="https://platform.xiaomimimo.com" target="_blank" rel="noopener">获取 API Key</a>
         </div>
     </div>
 
     <script>
-        // === 供应商端点 ===
         const providers = PROVIDERS_JSON;
+        const MAX_FILES = MAX_FILES_JS;
+        const MAX_FILE_SIZE = MAX_FILE_SIZE_JS * 1024 * 1024;
 
-        // === localStorage ===
-        const LS_KEY_APIKEY = 'mimo_tts_apikey';
-        const LS_KEY_ENDPOINT = 'mimo_tts_endpoint';
-        const LS_KEY_CUSTOM_URL = 'mimo_tts_custom_url';
+        // === localStorage 持久化 ===
+        const LS = {
+            APIKEY: 'mimo_tts_apikey',
+            ENDPOINT: 'mimo_tts_endpoint',
+            CUSTOM_URL: 'mimo_tts_custom_url',
+            TEMPERATURE: 'mimo_tts_temperature',
+            TOPP: 'mimo_tts_topp',
+            BATCH: 'mimo_tts_batch',
+            FORMAT: 'mimo_tts_format',
+        };
 
         function loadSaved() {
-            const savedKey = localStorage.getItem(LS_KEY_APIKEY);
-            const savedEp = localStorage.getItem(LS_KEY_ENDPOINT);
-            const savedUrl = localStorage.getItem(LS_KEY_CUSTOM_URL);
-            if (savedKey) document.getElementById('apiKey').value = savedKey;
-            if (savedEp !== null) {
-                document.getElementById('endpointSelect').value = savedEp;
-                onEndpointChange();
-            }
-            if (savedUrl) document.getElementById('customUrl').value = savedUrl;
+            const k = localStorage.getItem(LS.APIKEY);
+            if (k) document.getElementById('apiKey').value = k;
+
+            const ep = localStorage.getItem(LS.ENDPOINT);
+            if (ep !== null) { document.getElementById('endpointSelect').value = ep; onEndpointChange(); }
+
+            const cu = localStorage.getItem(LS.CUSTOM_URL);
+            if (cu) document.getElementById('customUrl').value = cu;
+
+            const t = localStorage.getItem(LS.TEMPERATURE);
+            if (t) { document.getElementById('temperature').value = t; document.getElementById('tempVal').textContent = t; }
+
+            const tp = localStorage.getItem(LS.TOPP);
+            if (tp) { document.getElementById('topP').value = tp; document.getElementById('toppVal').textContent = tp; }
+
+            const b = localStorage.getItem(LS.BATCH);
+            if (b) document.getElementById('batchCount').value = b;
+
+            const f = localStorage.getItem(LS.FORMAT);
+            if (f) document.getElementById('format').value = f;
         }
 
         function saveSettings() {
-            const key = document.getElementById('apiKey').value;
-            const ep = document.getElementById('endpointSelect').value;
-            const url = document.getElementById('customUrl').value;
-            if (key) localStorage.setItem(LS_KEY_APIKEY, key);
-            localStorage.setItem(LS_KEY_ENDPOINT, ep);
-            if (url) localStorage.setItem(LS_KEY_CUSTOM_URL, url);
+            const pairs = [
+                [LS.APIKEY, document.getElementById('apiKey').value],
+                [LS.ENDPOINT, document.getElementById('endpointSelect').value],
+                [LS.CUSTOM_URL, document.getElementById('customUrl').value],
+                [LS.TEMPERATURE, document.getElementById('temperature').value],
+                [LS.TOPP, document.getElementById('topP').value],
+                [LS.BATCH, document.getElementById('batchCount').value],
+                [LS.FORMAT, document.getElementById('format').value],
+            ];
+            for (const [k, v] of pairs) {
+                if (v) localStorage.setItem(k, v);
+                else localStorage.removeItem(k);
+            }
         }
 
         function clearSavedKey() {
-            localStorage.removeItem(LS_KEY_APIKEY);
+            localStorage.removeItem(LS.APIKEY);
             document.getElementById('apiKey').value = '';
         }
 
@@ -388,40 +522,42 @@ HTML = """
             document.getElementById('toppVal').textContent = p.topp;
             document.querySelectorAll('.preset-btn').forEach(b => b.classList.remove('active'));
             event.target.classList.add('active');
+            saveSettings();
         }
 
-        audioInput.addEventListener('change', function() {
-            addFiles(this.files);
-            this.value = '';
-        });
-
+        audioInput.addEventListener('change', function() { addFiles(this.files); this.value = ''; });
         dropZone.addEventListener('click', () => audioInput.click());
-        dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.style.borderColor = '#4a90d9'; });
-        dropZone.addEventListener('dragleave', () => { dropZone.style.borderColor = '#e0e0e0'; });
+        dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('dragover'); });
+        dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
         dropZone.addEventListener('drop', (e) => {
-            e.preventDefault(); dropZone.style.borderColor = '#e0e0e0';
+            e.preventDefault(); dropZone.classList.remove('dragover');
             addFiles(e.dataTransfer.files);
         });
 
         function addFiles(files) {
             for (const f of files) {
+                if (uploadedFiles.length >= MAX_FILES) {
+                    showError('最多上传 ' + MAX_FILES + ' 个文件'); break;
+                }
                 const ext = f.name.split('.').pop().toLowerCase();
                 if (!['mp3','wav','wave'].includes(ext)) continue;
+                if (f.size > MAX_FILE_SIZE) {
+                    showError(f.name + ' 超过 ' + MAX_FILE_SIZE_JS + ' MB 限制'); continue;
+                }
                 if (uploadedFiles.some(u => u.name === f.name && u.size === f.size)) continue;
                 uploadedFiles.push(f);
             }
             renderFileList();
         }
 
-        function removeFile(idx) {
-            uploadedFiles.splice(idx, 1);
-            renderFileList();
-        }
+        function removeFile(idx) { uploadedFiles.splice(idx, 1); renderFileList(); }
 
         function renderFileList() {
             fileList.innerHTML = '';
             mergeHint.style.display = uploadedFiles.length > 1 ? 'block' : 'none';
+            let totalSize = 0;
             uploadedFiles.forEach((f, i) => {
+                totalSize += f.size;
                 const mb = (f.size / 1024 / 1024).toFixed(2);
                 const div = document.createElement('div');
                 div.className = 'file-item';
@@ -507,14 +643,22 @@ HTML = """
         function showError(m) { const el = document.getElementById('errorMsg'); el.textContent = m; el.classList.add('show'); }
         function hideError() { document.getElementById('errorMsg').classList.remove('show'); }
 
-        // === 初始化 ===
         document.addEventListener('DOMContentLoaded', loadSaved);
     </script>
 </body>
 </html>
 """
 
+# 模板注入
 HTML = HTML.replace("PROVIDERS_JSON", _json.dumps(PROVIDERS, ensure_ascii=False))
+HTML = HTML.replace("MAX_FILES_PLACEHOLDER", str(MAX_FILES))
+HTML = HTML.replace("MAX_FILE_SIZE_PLACEHOLDER", str(MAX_FILE_SIZE_MB))
+HTML = HTML.replace("MAX_FILES_JS", str(MAX_FILES))
+HTML = HTML.replace("MAX_FILE_SIZE_JS", str(MAX_FILE_SIZE_MB))
+if GA_ID:
+    HTML = HTML.replace("GA_SCRIPT_PLACEHOLDER", GA_SCRIPT.replace("GA_ID_PLACEHOLDER", GA_ID))
+else:
+    HTML = HTML.replace("GA_SCRIPT_PLACEHOLDER", "")
 
 
 @app.route("/")
@@ -522,8 +666,29 @@ def index():
     return render_template_string(HTML)
 
 
+# ============ 管理后台 ============
+@app.route("/admin/stats")
+@admin_required
+def admin_stats():
+    uptime = int(time.time() - _stats["start_time"])
+    hours, rem = divmod(uptime, 3600)
+    mins, secs = divmod(rem, 60)
+    return jsonify({
+        "uptime": f"{hours}h {mins}m {secs}s",
+        "total_requests": _stats["total_requests"],
+        "total_errors": _stats["total_errors"],
+        "rate_limit": f"{RATE_LIMIT}/min",
+        "max_files": MAX_FILES,
+        "max_file_size": f"{MAX_FILE_SIZE_MB}MB",
+        "ga_enabled": bool(GA_ID),
+    })
+
+
+# ============ API ============
 @app.route("/api/clone", methods=["POST"])
 def api_clone():
+    _stats["total_requests"] += 1
+
     api_key = request.form.get("api_key", "").strip()
     base_url = request.form.get("base_url", "").strip()
     instruction = request.form.get("instruction", "").strip()
@@ -533,16 +698,25 @@ def api_clone():
     top_p = float(request.form.get("top_p", 0.95))
     seed = request.form.get("seed", "").strip()
 
+    # 参数校验
     if not api_key:
         return jsonify({"error": "请填写 API Key"}), 400
     if not base_url:
         return jsonify({"error": "请选择或输入 API 端点"}), 400
     if not text:
         return jsonify({"error": "请输入要合成的文本"}), 400
+    if len(text) > 5000:
+        return jsonify({"error": "文本过长，最多 5000 字"}), 400
+    if not (0 <= temperature <= 1.5):
+        return jsonify({"error": "temperature 范围 0-1.5"}), 400
+    if not (0.01 <= top_p <= 1.0):
+        return jsonify({"error": "top_p 范围 0.01-1.0"}), 400
 
     audio_files = request.files.getlist("audio")
     if not audio_files or not audio_files[0].filename:
         return jsonify({"error": "请上传参考音频"}), 400
+    if len(audio_files) > MAX_FILES:
+        return jsonify({"error": f"最多上传 {MAX_FILES} 个文件"}), 400
 
     tmp_files = []
     tmp_out = None
@@ -554,6 +728,10 @@ def api_clone():
             tmp = tempfile.NamedTemporaryFile(delete=False, suffix=ext)
             af.save(tmp.name)
             tmp.close()
+            size = os.path.getsize(tmp.name)
+            if size > MAX_FILE_SIZE_MB * 1024 * 1024:
+                os.unlink(tmp.name)
+                return jsonify({"error": f"文件 {af.filename} 超过 {MAX_FILE_SIZE_MB}MB 限制"}), 400
             tmp_files.append(tmp.name)
 
         if len(tmp_files) == 1:
@@ -572,8 +750,8 @@ def api_clone():
             mime_type = "audio/wav"
 
         size_mb = len(voice_bytes) / (1024 * 1024)
-        if size_mb > 10:
-            return jsonify({"error": f"拼接后音频过大 ({size_mb:.1f}MB)，最大 10MB。请减少时长或文件数。"}), 400
+        if size_mb > MAX_TOTAL_SIZE_MB:
+            return jsonify({"error": f"拼接后音频过大 ({size_mb:.1f}MB)，最大 {MAX_TOTAL_SIZE_MB}MB"}), 400
 
         voice_b64 = base64.b64encode(voice_bytes).decode("utf-8")
 
@@ -606,13 +784,14 @@ def api_clone():
         return send_file(tmp_out.name, mimetype="audio/wav", as_attachment=True, download_name=f"clone{out_ext}")
 
     except Exception as e:
+        _stats["total_errors"] += 1
         msg = str(e)
         if "401" in msg or "Unauthorized" in msg.lower():
-            return jsonify({"error": "API Key 无效，请在 platform.xiaomimimo.com 检查你的 Key"}), 401
+            return jsonify({"error": "API Key 无效，请检查你的 Key"}), 401
         if "429" in msg or "rate" in msg.lower():
             return jsonify({"error": "请求频率过高，请稍后再试"}), 429
         if "timeout" in msg.lower() or "connect" in msg.lower():
-            return jsonify({"error": f"网络错误: {msg}。请检查网络连接和端点地址。"}), 502
+            return jsonify({"error": f"网络错误，请检查网络和端点地址"}), 502
         return jsonify({"error": msg}), 500
     finally:
         for f in tmp_files:
@@ -623,8 +802,13 @@ def api_clone():
 
 
 if __name__ == "__main__":
+    port = int(os.environ.get("PORT", "7860"))
     print("=" * 50)
     print("  小米 MiMo 语音克隆")
-    print("  http://localhost:7860")
+    print(f"  http://localhost:{port}")
+    if ADMIN_USER:
+        print(f"  管理后台: http://localhost:{port}/admin/stats")
+    if GA_ID:
+        print(f"  Google Analytics: {GA_ID}")
     print("=" * 50)
-    app.run(host="0.0.0.0", port=7860, debug=False)
+    app.run(host="0.0.0.0", port=port, debug=False)

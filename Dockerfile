@@ -17,4 +17,7 @@ EXPOSE 7860
 HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:7860')" || exit 1
 
+# 支持通过环境变量配置
+ENV PORT=7860
+
 CMD ["python", "app.py"]
