@@ -15,13 +15,13 @@ A web-based voice cloning application powered by Xiaomi's MiMo-V2.5-TTS API. Upl
 
 ## Quick Start
 
-### Prerequisites
+### Option 1: Download EXE (No Python Required)
 
-- Python 3.9+
-- [ffmpeg](https://ffmpeg.org/download.html) (for MP3 support)
-- A MiMo API Key from [platform.xiaomimimo.com](https://platform.xiaomimimo.com)
+Download the latest `.exe` from [Releases](https://github.com/tangyucheng6420/xiaomi-mimo-tts-webui/releases) and double-click to run.
 
-### One-Click Launch
+> Requires [ffmpeg](https://ffmpeg.org/download.html) for MP3 support (WAV works without it).
+
+### Option 2: Run with Python
 
 **Windows:**
 ```
@@ -34,28 +34,21 @@ chmod +x start.sh
 ./start.sh
 ```
 
-The script will automatically create a virtual environment, install dependencies, and open the browser.
-
-### Manual Setup
-
+**Or manually:**
 ```bash
-# Clone the repository
 git clone https://github.com/tangyucheng6420/xiaomi-mimo-tts-webui.git
 cd xiaomi-mimo-tts-webui
-
-# Create virtual environment
-python -m venv venv
-source venv/bin/activate  # Linux/macOS
-# or: venv\Scripts\activate  # Windows
-
-# Install dependencies
 pip install -r requirements.txt
-
-# Run
 python app.py
 ```
 
 Open http://localhost:7860 in your browser.
+
+### Prerequisites
+
+- Python 3.9+ (not needed for EXE version)
+- [ffmpeg](https://ffmpeg.org/download.html) (for MP3 support; WAV works without it)
+- A MiMo API Key from [platform.xiaomimimo.com](https://platform.xiaomimimo.com)
 
 ## Usage
 
@@ -107,6 +100,7 @@ xiaomi-mimo-tts-webui/
 ├── requirements.txt    # Python dependencies
 ├── start.bat           # Windows one-click launcher
 ├── start.sh            # Linux/macOS one-click launcher
+├── build.py            # Build script for generating .exe
 ├── LICENSE             # MIT License
 └── README.md           # This file
 ```
