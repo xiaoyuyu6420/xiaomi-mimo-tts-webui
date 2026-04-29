@@ -5,14 +5,17 @@
 """
 
 import base64
+import csv
 import io
 import os
+import sqlite3
 import time
 import tempfile
 import atexit
 import threading
 import json as _json
 from collections import defaultdict
+from datetime import datetime, timedelta
 from functools import wraps
 
 from flask import Flask, render_template_string, request, send_file, jsonify, Response
@@ -29,7 +32,6 @@ app.secret_key = os.environ.get("SECRET_KEY", os.urandom(24).hex())
 # ============ 配置 ============
 ADMIN_USER = os.environ.get("ADMIN_USER", "")
 ADMIN_PASS = os.environ.get("ADMIN_PASS", "")
-GA_ID = os.environ.get("GA_ID", "")
 MAX_FILES = int(os.environ.get("MAX_FILES", "5"))
 MAX_FILE_SIZE_MB = int(os.environ.get("MAX_FILE_SIZE_MB", "5"))
 MAX_TOTAL_SIZE_MB = int(os.environ.get("MAX_TOTAL_SIZE_MB", "10"))
@@ -88,8 +90,63 @@ def _cleanup_temps():
 
 atexit.register(_cleanup_temps)
 
-# ============ 统计 ============
-_stats = {"total_requests": 0, "total_errors": 0, "start_time": time.time()}
+# ============ 本地统计 (SQLite) ============
+DB_PATH = os.environ.get("DB_PATH", "stats.db")
+_start_time = time.time()
+
+def _get_db():
+    db = sqlite3.connect(DB_PATH)
+    db.row_factory = sqlite3.Row
+    return db
+
+def _init_db():
+    db = _get_db()
+    db.executescript("""
+        CREATE TABLE IF NOT EXISTS page_views (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ts TEXT NOT NULL,
+            ip TEXT,
+            path TEXT,
+            user_agent TEXT
+        );
+        CREATE TABLE IF NOT EXISTS api_calls (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ts TEXT NOT NULL,
+            ip TEXT,
+            success INTEGER,
+            error TEXT,
+            duration REAL
+        );
+    """)
+    db.commit()
+    db.close()
+
+_init_db()
+
+_db_lock = threading.Lock()
+
+def _track_page_view(ip, path, ua):
+    with _db_lock:
+        db = _get_db()
+        db.execute("INSERT INTO page_views (ts, ip, path, user_agent) VALUES (?, ?, ?, ?)",
+                   (datetime.utcnow().isoformat(), ip, path, ua[:500]))
+        db.commit()
+        db.close()
+
+def _track_api_call(ip, success, error="", duration=0.0):
+    with _db_lock:
+        db = _get_db()
+        db.execute("INSERT INTO api_calls (ts, ip, success, error, duration) VALUES (?, ?, ?, ?, ?)",
+                   (datetime.utcnow().isoformat(), ip, int(success), error[:200], duration))
+        db.commit()
+        db.close()
+
+@app.before_request
+def track_views():
+    if request.path.startswith("/admin") or request.path.startswith("/static"):
+        return
+    if request.method == "GET" and not request.path.startswith("/api/"):
+        _track_page_view(request.remote_addr, request.path, request.headers.get("User-Agent", ""))
 
 # ============ 供应商端点 ============
 PROVIDERS = [
@@ -98,17 +155,6 @@ PROVIDERS = [
 ]
 
 # ============ HTML ============
-GA_SCRIPT = """
-<!-- Google Analytics -->
-<script async src="https://www.googletagmanager.com/gtag/js?id=GA_ID_PLACEHOLDER"></script>
-<script>
-  window.dataLayer = window.dataLayer || [];
-  function gtag(){dataLayer.push(arguments);}
-  gtag('js', new Date());
-  gtag('config', 'GA_ID_PLACEHOLDER');
-</script>
-""" if GA_ID else ""
-
 HTML = """
 <!DOCTYPE html>
 <html lang="zh">
@@ -133,8 +179,6 @@ HTML = """
     <meta name="twitter:card" content="summary">
     <meta name="twitter:title" content="小米 MiMo 语音克隆">
     <meta name="twitter:description" content="基于小米 MiMo-V2.5-TTS 的在线语音克隆工具">
-
-    GA_SCRIPT_PLACEHOLDER
 
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -655,10 +699,6 @@ HTML = HTML.replace("MAX_FILES_PLACEHOLDER", str(MAX_FILES))
 HTML = HTML.replace("MAX_FILE_SIZE_PLACEHOLDER", str(MAX_FILE_SIZE_MB))
 HTML = HTML.replace("MAX_FILES_JS", str(MAX_FILES))
 HTML = HTML.replace("MAX_FILE_SIZE_JS", str(MAX_FILE_SIZE_MB))
-if GA_ID:
-    HTML = HTML.replace("GA_SCRIPT_PLACEHOLDER", GA_SCRIPT.replace("GA_ID_PLACEHOLDER", GA_ID))
-else:
-    HTML = HTML.replace("GA_SCRIPT_PLACEHOLDER", "")
 
 
 @app.route("/")
@@ -670,24 +710,76 @@ def index():
 @app.route("/admin/stats")
 @admin_required
 def admin_stats():
-    uptime = int(time.time() - _stats["start_time"])
+    db = _get_db()
+    uptime = int(time.time() - _start_time)
     hours, rem = divmod(uptime, 3600)
     mins, secs = divmod(rem, 60)
+
+    total_views = db.execute("SELECT COUNT(*) FROM page_views").fetchone()[0]
+    total_calls = db.execute("SELECT COUNT(*) FROM api_calls").fetchone()[0]
+    total_errors = db.execute("SELECT COUNT(*) FROM api_calls WHERE success=0").fetchone()[0]
+
+    today = datetime.utcnow().strftime("%Y-%m-%d")
+    views_today = db.execute("SELECT COUNT(*) FROM page_views WHERE ts LIKE ?", (today + "%",)).fetchone()[0]
+    calls_today = db.execute("SELECT COUNT(*) FROM api_calls WHERE ts LIKE ?", (today + "%",)).fetchone()[0]
+
+    # 最近 7 天每日统计
+    daily = []
+    for i in range(6, -1, -1):
+        d = (datetime.utcnow() - timedelta(days=i)).strftime("%Y-%m-%d")
+        v = db.execute("SELECT COUNT(*) FROM page_views WHERE ts LIKE ?", (d + "%",)).fetchone()[0]
+        c = db.execute("SELECT COUNT(*) FROM api_calls WHERE ts LIKE ?", (d + "%",)).fetchone()[0]
+        daily.append({"date": d, "views": v, "calls": c})
+
+    # 独立访客数
+    unique_ips = db.execute("SELECT COUNT(DISTINCT ip) FROM page_views").fetchone()[0]
+
+    db.close()
+
     return jsonify({
         "uptime": f"{hours}h {mins}m {secs}s",
-        "total_requests": _stats["total_requests"],
-        "total_errors": _stats["total_errors"],
+        "total_page_views": total_views,
+        "total_api_calls": total_calls,
+        "total_errors": total_errors,
+        "unique_visitors": unique_ips,
+        "today_page_views": views_today,
+        "today_api_calls": calls_today,
+        "daily": daily,
         "rate_limit": f"{RATE_LIMIT}/min",
         "max_files": MAX_FILES,
         "max_file_size": f"{MAX_FILE_SIZE_MB}MB",
-        "ga_enabled": bool(GA_ID),
     })
+
+
+@app.route("/admin/export/<table>")
+@admin_required
+def admin_export(table):
+    if table not in ("page_views", "api_calls"):
+        return jsonify({"error": "无效的表名"}), 400
+
+    db = _get_db()
+    rows = db.execute(f"SELECT * FROM {table} ORDER BY id DESC LIMIT 10000").fetchall()
+    cols = [d[0] for d in db.execute(f"SELECT * FROM {table} LIMIT 1").description] if rows else []
+    db.close()
+
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    if cols:
+        w.writerow(cols)
+    for row in rows:
+        w.writerow(list(row))
+
+    return Response(
+        buf.getvalue().encode("utf-8-sig"),
+        mimetype="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={table}_{datetime.utcnow().strftime('%Y%m%d')}.csv"}
+    )
 
 
 # ============ API ============
 @app.route("/api/clone", methods=["POST"])
 def api_clone():
-    _stats["total_requests"] += 1
+    t0 = time.time()
 
     api_key = request.form.get("api_key", "").strip()
     base_url = request.form.get("base_url", "").strip()
@@ -781,18 +873,20 @@ def api_clone():
         tmp_out.close()
         _temp_files.append(tmp_out.name)
 
+        _track_api_call(request.remote_addr, True, duration=time.time() - t0)
         return send_file(tmp_out.name, mimetype="audio/wav", as_attachment=True, download_name=f"clone{out_ext}")
 
     except Exception as e:
-        _stats["total_errors"] += 1
         msg = str(e)
+        err_msg = msg
         if "401" in msg or "Unauthorized" in msg.lower():
-            return jsonify({"error": "API Key 无效，请检查你的 Key"}), 401
-        if "429" in msg or "rate" in msg.lower():
-            return jsonify({"error": "请求频率过高，请稍后再试"}), 429
-        if "timeout" in msg.lower() or "connect" in msg.lower():
-            return jsonify({"error": f"网络错误，请检查网络和端点地址"}), 502
-        return jsonify({"error": msg}), 500
+            err_msg = "API Key 无效，请检查你的 Key"
+        elif "429" in msg or "rate" in msg.lower():
+            err_msg = "请求频率过高，请稍后再试"
+        elif "timeout" in msg.lower() or "connect" in msg.lower():
+            err_msg = "网络错误，请检查网络和端点地址"
+        _track_api_call(request.remote_addr, False, err_msg, time.time() - t0)
+        return jsonify({"error": err_msg}), 500
     finally:
         for f in tmp_files:
             try:
@@ -808,7 +902,5 @@ if __name__ == "__main__":
     print(f"  http://localhost:{port}")
     if ADMIN_USER:
         print(f"  管理后台: http://localhost:{port}/admin/stats")
-    if GA_ID:
-        print(f"  Google Analytics: {GA_ID}")
     print("=" * 50)
     app.run(host="0.0.0.0", port=port, debug=False)
