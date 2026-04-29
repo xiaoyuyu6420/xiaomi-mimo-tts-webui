@@ -15,11 +15,23 @@
 
 ## 快速开始
 
-### 方式一：下载 EXE（无需安装 Python）
+### 方式一：Docker（推荐）
 
-从 [Releases](https://github.com/tangyucheng6420/xiaomi-mimo-tts-webui/releases) 下载 `.exe` 文件，双击即可运行。
+只需安装 [Docker](https://www.docker.com/get-started)，一行命令启动：
 
-> 需要 [ffmpeg](https://ffmpeg.org/download.html) 支持 MP3 格式（WAV 格式无需 ffmpeg）。
+```bash
+docker run -p 7860:7860 ghcr.io/tangyucheng6420/xiaomi-mimo-tts-webui:latest
+```
+
+或者使用 docker-compose：
+
+```bash
+git clone https://github.com/tangyucheng6420/xiaomi-mimo-tts-webui.git
+cd xiaomi-mimo-tts-webui
+docker-compose up -d
+```
+
+浏览器打开 http://localhost:7860 即可使用。
 
 ### 方式二：Python 运行
 
@@ -42,12 +54,10 @@ pip install -r requirements.txt
 python app.py
 ```
 
-浏览器打开 http://localhost:7860 即可使用。
-
 ### 前置条件
 
-- Python 3.9+（EXE 版本不需要）
-- [ffmpeg](https://ffmpeg.org/download.html)（MP3 支持需要，WAV 可以不要）
+- Docker（方式一）或 Python 3.9+（方式二）
+- [ffmpeg](https://ffmpeg.org/download.html)（Python 方式需要，Docker 已内置）
 - MiMo API Key，从 [platform.xiaomimimo.com](https://platform.xiaomimimo.com) 获取
 
 ## 使用方法
@@ -98,9 +108,11 @@ xiaomi-mimo-tts-webui/
 ├── app.py              # 主应用（Flask + 内嵌前端）
 ├── mimo_tts_example.py # API 调用示例
 ├── requirements.txt    # Python 依赖
-├── start.bat           # Windows 一键启动
-├── start.sh            # Linux/macOS 一键启动
-├── build.py            # EXE 打包脚本
+├── Dockerfile          # Docker 镜像构建
+├── docker-compose.yml  # Docker Compose 一键启动
+├── start.bat           # Windows 一键启动（Python）
+├── start.sh            # Linux/macOS 一键启动（Python）
+├── build.py            # 打包脚本
 ├── LICENSE             # MIT 开源协议
 └── README.md           # 本文件
 ```
