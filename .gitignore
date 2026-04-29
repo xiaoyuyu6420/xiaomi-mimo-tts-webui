@@ -1,0 +1,13 @@
+venv/
+__pycache__/
+*.pyc
+*.pyo
+.env
+output/
+*.tmp
+*.egg-info/
+dist/
+build/
+.playwright-mcp/
+.DS_Store
+Thumbs.db
